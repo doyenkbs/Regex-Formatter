@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Tanium Regex Generator</title>
+<style>
+    body { 
+        font-family: Arial, sans-serif; 
+        margin: 30px; 
+        background: #f4f4f4; 
+    }
+    textarea { 
+        width: 100%; 
+        height: 180px; 
+        padding: 10px; 
+        font-size: 14px; 
+        box-sizing: border-box; 
+    }
+    button { 
+        padding: 10px 15px; 
+        font-size: 14px; 
+        margin-right: 10px; 
+        background-color: #007bff;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+    }
+    button:hover {
+        background-color: #0056b3;
+    }
+    #output { 
+        background: #fff; 
+        padding: 12px; 
+        border: 1px solid #aaa; 
+        margin-top: 15px; 
+        font-family: 'Consolas', 'Courier New', monospace;
+        user-select: all; /* Make content selectable */
+        cursor: text;
+        min-height: 20px;
+    }
+</style>
+</head>
+<body>
+
+<h2>Tanium Regex Generator</h2>
+<p>Paste a list of items (comma-separated or one per line). The script will create a Tanium-friendly regex.</p>
+
+<textarea id="inputList" placeholder="Paste items here...
+Example:
+server-a.domain.com
+client-b
+10.10.1.5
+server-a.domain.com (duplicate)"></textarea>
+<br><br>
+
+<button onclick="generateRegex()">Generate Regex</button>
+<button onclick="copyRegex()">Copy Regex</button>
+
+<h3>Generated Tanium Regex:</h3>
+<div id="output">(press Generate Regex)</div>
+
+<script>
+function generateRegex() {
+    let raw = document.getElementById("inputList").value;
+
+    if (!raw.trim()) {
+        document.getElementById("output").innerText = "⚠ Please paste some items.";
+        return;
+    }
+
+    // Split by newline or comma
+    let items = raw
+        .split(/[\n,]+/)
+        .map(x => x.trim())
+        .filter(x => x.length > 0);
+
+    // Remove duplicates
+    items = [...new Set(items)];
+
+    // Escape regex characters for Tanium compatibility
+    // This function escapes all common special characters, including the dot (.)
+    const escapeRegex = (str) =>
+        str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    // Escape and join into OR format
+    let regex = items.map(escapeRegex).join("|");
+
+    // Wrap in a capturing group for the final Tanium-friendly regex
+    let finalRegex = `(${regex})`;
+
+    // Output
+    document.getElementById("output").innerText = finalRegex;
+}
+
+function copyRegex() {
+    let regex = document.getElementById("output").innerText;
+
+    if (!regex || regex === "(press Generate Regex)" || regex.includes("⚠")) {
+        alert("No valid regex to copy. Please generate one first.");
+        return;
+    }
+
+    // Use the modern clipboard API
+    navigator.clipboard.writeText(regex)
+        .then(() => {
+            alert("Regex copied to clipboard!");
+        })
+        .catch(err => {
+            // Fallback for older browsers
+            const textArea = document.createElement("textarea");
+            textArea.value = regex;
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                alert("Regex copied to clipboard (fallback success)!");
+            } catch (e) {
+                alert("Failed to copy regex. Please select and copy manually.");
+            }
+            document.body.removeChild(textArea);
+        });
+}
+</script>
+
+</body>
+  <!--==================== FOOTER ====================-->
+      <footer class="footer">
+         <div class="footer__container container grid">
+            <ul class="footer__links">
+               <li>
+                  <a href="#list_to_regex.html" class="footer__link">List to Regex formater</a>
+               </li>
+            </ul>
+   
+            <span class="footer__copy">
+               &#169; 2025 All Rights Reserved By Christian Kaba
+            </span>
+
+         </div>
+      </footer>
+
+</html>

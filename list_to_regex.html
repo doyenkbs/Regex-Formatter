@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>List → Regex formatter</title>
+<style>
+  body{font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;margin:18px;color:#111}
+  h1{margin:0 0 8px}
+  .row{display:flex;gap:12px;align-items:flex-start}
+  textarea{width:100%;min-height:180px;padding:10px;border:1px solid #ddd;border-radius:6px;resize:vertical;font-family:monospace}
+  input,select,button{padding:8px;border:1px solid #cfcfcf;border-radius:6px;background:#fff}
+  .card{border:1px solid #e6e6e6;padding:12px;border-radius:8px;background:#fbfbfb}
+  label{font-size:13px;display:block;margin-bottom:6px}
+  .controls{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+  .small{font-size:12px;color:#555}
+  .output{white-space:pre-wrap;word-break:break-all;padding:10px;background:#fff;border:1px solid #ddd;border-radius:6px;font-family:monospace}
+  button.primary{background:#0b63d6;color:#fff;border-color:#0b63d6}
+  .toggles{display:flex;gap:8px;flex-wrap:wrap}
+  .inline{display:flex;gap:8px;align-items:center}
+  .footer{margin-top:12px;color:#666;font-size:13px}
+  .hint{font-size:12px;color:#666;margin-top:6px}
+</style>
+</head>
+<body>
+  <h1>List → Regex formatter</h1>
+  <div class="card">
+    <label for="input">Paste your items (CSV, comma separated, newline list, or spreadsheet paste)</label>
+    <textarea id="input" placeholder="example:
+apple
+orange
+pear"></textarea>
+
+    <div class="controls">
+      <div style="min-width:220px">
+        <label>Input column (for spreadsheet / multi-column paste)</label>
+        <select id="colIndex">
+          <option value="0">Column 1 (default)</option>
+          <option value="1">Column 2</option>
+          <option value="2">Column 3</option>
+          <option value="3">Column 4</option>
+          <option value="4">Column 5</option>
+          <option value="5">Column 6</option>
+          <option value="6">Column 7</option>
+          <option value="7">Column 8</option>
+          <option value="8">Column 9</option>
+          <option value="9">Column 10</option>
+        </select>
+        <div class="small hint">If you pasted a spreadsheet, choose which column contains the values.</div>
+      </div>
+
+      <div style="min-width:220px">
+        <label>Delimiter (auto-detect by default)</label>
+        <select id="delimiter">
+          <option value="auto">Auto-detect</option>
+          <option value=",">Comma (,)</option>
+          <option value="tab">Tab (spreadsheet paste)</option>
+          <option value="newline">Newline</option>
+          <option value="semicolon">Semicolon (;)</option>
+        </select>
+      </div>
+
+      <div style="min-width:260px">
+        <label>Regex options</label>
+        <div class="toggles">
+          <label class="inline"><input type="checkbox" id="wordBoundary" /> Add word boundaries \b ... \b</label>
+          <label class="inline"><input type="checkbox" id="startAnchor" /> Anchor ^ (start)</label>
+          <label class="inline"><input type="checkbox" id="endAnchor" /> Anchor $ (end)</label>
+          <label class="inline"><input type="checkbox" id="caseInsensitive" /> Case-insensitive (i)</label>
+          <label class="inline"><input type="checkbox" id="useNonCapturing" checked /> Use non-capturing group (?:...)</label>
+        </div>
+        <div class="hint">You can combine anchors and boundaries; the tool will assemble a valid regex string and flags.</div>
+      </div>
+
+      <div style="min-width:160px">
+        <label>Transform</label>
+        <div class="toggles">
+          <label class="inline"><input type="checkbox" id="unique" checked /> Deduplicate</label>
+          <label class="inline"><input type="checkbox" id="sort" /> Sort alphabetically</label>
+          <label class="inline"><input type="checkbox" id="escapeSpaces" checked /> Trim & normalize whitespace</label>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:8px;align-items:center;margin-top:4px">
+      <button id="buildBtn" class="primary">Build regex</button>
+      <button id="clearBtn">Clear</button>
+      <button id="sampleBtn">Insert sample data</button>
+      <div style="margin-left:auto" class="small">Copy / download results below</div>
+    </div>
+  </div>
+
+  <h2 style="margin-top:14px">Output</h2>
+  <div class="card">
+    <label>Regex</label>
+    <div class="output" id="regexOutput">(press "Build regex")</div>
+
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button id="copyRegex">Copy regex</button>
+      <button id="copyPattern">Copy pattern only</button>
+      <button id="downloadBtn">Download .txt</button>
+      <div style="margin-left:auto" class="small" id="flagsDisplay">Flags: none</div>
+    </div>
+
+    <div style="margin-top:10px">
+      <label>Preview (sample match)</label>
+      <input id="previewInput" placeholder="Paste text to test the regex against" style="width:70%"/>
+      <button id="testBtn">Test</button>
+      <div id="previewResult" class="hint"></div>
+    </div>
+  </div>
+
+<script>
+/* Helper: escape regex special characters */
+function escapeRegex(str){
+  // keep backslash safe: first convert CR/LF to single space if desired
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/* Parse input into list of strings */
+function parseInput(raw, delimiter, colIndex, opts){
+  // Normalize line endings
+  raw = raw.replace(/\r\n/g,'\n').replace(/\r/g,'\n');
+  let rows = raw.split('\n').filter(r=>r.trim() !== '');
+  let items = [];
+
+  // If delimiter auto, detect most likely: tab (if any), comma, semicolon, else newline
+  if(delimiter === 'auto'){
+    let hasTab = raw.indexOf('\\t') !== -1 || raw.indexOf('\t') !== -1 || raw.indexOf('\u0009') !== -1;
+    if(hasTab) delimiter='tab';
+    else if(raw.indexOf(',') !== -1 && raw.indexOf(',') < raw.indexOf('\n')) delimiter=',';
+    else if(raw.indexOf(';') !== -1 && raw.indexOf(';') < raw.indexOf('\n')) delimiter=';';
+    else delimiter='newline';
+  }
+
+  for(let r of rows){
+    let parts;
+    if(delimiter === 'tab'){
+      parts = r.split(/\t/);
+    } else if(delimiter === ','){
+      // naive CSV split that handles quoted fields roughly:
+      // We will attempt a simple CSV parse for commas and quotes
+      parts = simpleCsvSplit(r);
+    } else if(delimiter === ';' || delimiter === 'semicolon'){
+      parts = r.split(';');
+    } else { // newline or fallback
+      parts = [r];
+    }
+    let chosen = (colIndex < parts.length) ? parts[colIndex] : parts[0];
+    if(chosen === undefined) chosen = '';
+    if(opts.escapeSpaces){
+      chosen = chosen.trim().replace(/\s+/g,' ');
+    } else {
+      chosen = chosen.trim();
+    }
+    if(chosen !== '') items.push(chosen);
+  }
+  return items;
+}
+
+/* Very small CSV row splitter that handles quoted fields (not a full RFC parser) */
+function simpleCsvSplit(line){
+  let out = [];
+  let cur = '';
+  let inQuote = false;
+  for(let i=0;i<line.length;i++){
+    let ch = line[i];
+    if(ch === '"' ){
+      if(inQuote && line[i+1] === '"'){ // escaped quote
+        cur += '"';
+        i++;
+      } else {
+        inQuote = !inQuote;
+      }
+    } else if(ch === ',' && !inQuote){
+      out.push(cur);
+      cur = '';
+    } else {
+      cur += ch;
+    }
+  }
+  out.push(cur);
+  return out;
+}
+
+/* Build regex string */
+function buildRegexFromItems(items, options){
+  // escape each item
+  let escaped = items.map(i => escapeRegex(i));
+
+  // If user wants to match whole words and items include spaces, note that \b won't match inside Unicode word chars reliably.
+  // We produce the pattern as alternation of items. If an item contains spaces we keep it as-is (escaped).
+  // Sort/dedup if requested
+  if(options.unique){
+    let set = new Set(escaped);
+    escaped = Array.from(set);
+  }
+  if(options.sort){
+    escaped.sort((a,b)=> a.localeCompare(b));
+  }
+
+  // If user wants to anchor each item separately (start/end), keep anchors outside group
+  let group = escaped.map(x => x).join('|') || '';
+  if(group === ''){
+    return {pattern: '', regex: '', flags: ''};
+  }
+  let groupWrapper = options.useNonCapturing ? `(?:${group})` : `(${group})`;
+
+  let pattern = groupWrapper;
+  if(options.wordBoundary){
+    pattern = '\\b' + pattern + '\\b';
+  }
+  if(options.startAnchor) pattern = '^' + pattern;
+  if(options.endAnchor) pattern = pattern + '$';
+
+  let flags = options.caseInsensitive ? 'i' : '';
+  let regexLiteral = flags ? `/${pattern}/${flags}` : `/${pattern}/`;
+
+  return {pattern, regex: regexLiteral, flags};
+}
+
+/* UI wiring */
+document.getElementById('buildBtn').addEventListener('click', ()=> {
+  const raw = document.getElementById('input').value;
+  const colIndex = parseInt(document.getElementById('colIndex').value,10)||0;
+  const delimiter = document.getElementById('delimiter').value;
+  const options = {
+    unique: document.getElementById('unique').checked,
+    sort: document.getElementById('sort').checked,
+    escapeSpaces: document.getElementById('escapeSpaces').checked,
+    wordBoundary: document.getElementById('wordBoundary').checked,
+    startAnchor: document.getElementById('startAnchor').checked,
+    endAnchor: document.getElementById('endAnchor').checked,
+    caseInsensitive: document.getElementById('caseInsensitive').checked,
+    useNonCapturing: document.getElementById('useNonCapturing').checked
+  };
+
+  let items = parseInput(raw, delimiter, colIndex, options);
+  if(items.length === 0){
+    document.getElementById('regexOutput').textContent = '(no items parsed)';
+    document.getElementById('flagsDisplay').textContent = 'Flags: none';
+    return;
+  }
+  let result = buildRegexFromItems(items, options);
+  document.getElementById('regexOutput').textContent = result.regex;
+  document.getElementById('flagsDisplay').textContent = 'Flags: ' + (result.flags || 'none');
+});
+
+/* Clear and sample */
+document.getElementById('clearBtn').addEventListener('click', ()=> {
+  document.getElementById('input').value = '';
+  document.getElementById('regexOutput').textContent = '(press "Build regex")';
+  document.getElementById('flagsDisplay').textContent = 'Flags: none';
+});
+document.getElementById('sampleBtn').addEventListener('click', ()=> {
+  const sample = `apple,orange,pear
+"cucumber, baby",broccoli
+strawberry
+banana
+apple   `;
+  document.getElementById('input').value = sample;
+});
+
+/* Copy / Download */
+document.getElementById('copyRegex').addEventListener('click', async ()=>{
+  const txt = document.getElementById('regexOutput').textContent;
+  try{
+    await navigator.clipboard.writeText(txt);
+    alert('Regex copied to clipboard');
+  }catch(e){
+    alert('Could not copy automatically, please select and copy manually.');
+  }
+});
+document.getElementById('copyPattern').addEventListener('click', async ()=>{
+  const pattern = document.getElementById('regexOutput').textContent.replace(/^\/|\/[a-z]*$/g,'');
+  try{
+    await navigator.clipboard.writeText(pattern);
+    alert('Pattern copied to clipboard');
+  }catch(e){
+    alert('Could not copy automatically, please select and copy manually.');
+  }
+});
+document.getElementById('downloadBtn').addEventListener('click', ()=>{
+  const content = document.getElementById('regexOutput').textContent;
+  const blob = new Blob([content], {type:'text/plain;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'regex.txt';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+});
+
+/* Test preview 
+document.getElementById('testBtn').addEventListener('click', ()=>{
+  const regexText = document.getElementById('regexOutput').textContent;
+  const sample = document.getElementById('previewInput').value;
+  if(!regexText || regexText.startsWith('(')) { document.getElementById('previewResult').textContent = 'No regex built yet.'; return; }
+  // parse literal /pattern/flags
+  let match = regexText.match(/^\/(.*)\/([a-z]*)$/);
+  if(!match){ document.getElementById('previewResult').textContent = 'Regex format not recognized.'; return; }
+  let pat = match[1];
+  let flags = match[2];
+  let re;
+  try{
+    re = new RegExp(pat, flags);
+  }catch(e){
+    document.getElementById('previewResult').textContent = 'Invalid regex: ' + e.message;
+    return;
+  }
+  const found = sample.match(re);
+  if(found){
+    document.getElementById('previewResult').textContent = 'Match found: ' + found[0];
+  } else {
+    document.getElementById('previewResult').textContent = 'No match.';
+  }
+}); */
+
+/* keyboard shortcut: Ctrl+Enter builds */
+document.addEventListener('keydown',(e)=>{
+  if((e.ctrlKey||e.metaKey) && e.key === 'Enter'){
+    document.getElementById('buildBtn').click();
+  }
+});
+</script>
+</body>
+  <!--==================== FOOTER ====================-->
+      <footer class="footer">
+         <div class="footer__container container grid">
+            <ul class="footer__links">
+               <li>
+                  <a href="#work" class="footer__link">Tanium Regex Generator</a>
+               </li>
+            </ul>
+   
+            <span class="footer__copy">
+               &#169; 2025 All Rights Reserved By Christian Kaba
+            </span>
+
+         </div>
+      </footer>
+
+</html>
