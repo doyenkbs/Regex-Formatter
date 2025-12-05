@@ -1,0 +1,2 @@
+# Regex-Formatter
+Regex Formatter is a web tool that converts pasted lists (CSV, comma‑separated, newline, or spreadsheet data) into ready‑to‑use regular expressions with optional flags and formatting options. It supports selecting a specific input column, auto‑detecting or choosing delimiters, adding anchors and word boundaries.
